@@ -1,0 +1,185 @@
+{
+  "id": "approvelink00001",
+  "name": "Lead intake: approve a draft from its link",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "approve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "aec7f3ab-fb62-54e9-bf9a-14833b60265b",
+      "name": "Approval link",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "bf3ab90e-5340-52e1-a14e-3701f7e9df35"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE outbox SET status = 'sent', approved_at = now() WHERE lead_id = $1 AND token = $2 AND status = 'pending_approval' RETURNING lead_id, subject",
+        "options": {
+          "queryReplacement": "={{ [Number($json.query.id) || 0, String($json.query.token || '')] }}"
+        }
+      },
+      "id": "060a4ccc-16e7-53dd-a2af-e705e0839810",
+      "name": "Mark approved",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "leadsdbcred00001",
+          "name": "Leads DB"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.lead_id ? 0 : 1 }}"
+      },
+      "id": "4af2349e-df83-5636-9623-af1035e61485",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Replace this step with a Gmail, Outlook or SMTP node. The draft only goes out after a person clicks the link.\nreturn { json: { ...$json, sent: true } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "ba9307c8-3d65-5b8d-93b2-398d62aba5ee",
+      "name": "Send the email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=<p>Approved. Reply to lead {{ $json.lead_id }} (\"{{ $json.subject }}\") was sent.</p>",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "79998ee7-e907-5c3a-9bd0-ad3a74b2df44",
+      "name": "Reply: sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<p>This approval link was already used or is not valid.</p>",
+        "options": {
+          "responseCode": 404,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "513858cf-d8ca-55fb-8c0f-0eb133089987",
+      "name": "Reply: invalid link",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Approval link": {
+      "main": [
+        [
+          {
+            "node": "Mark approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark approved": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Send the email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: invalid link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send the email": {
+      "main": [
+        [
+          {
+            "node": "Reply: sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "errorlog00000001"
+  },
+  "active": false,
+  "pinData": {}
+}

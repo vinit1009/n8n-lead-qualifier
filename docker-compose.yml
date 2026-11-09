@@ -1,0 +1,37 @@
+# Postgres for the lead data and n8n 2.46.6 (the version the workflows were built and tested on).
+# Copy .env.example to .env, fill it in, then: docker compose up -d && ./setup.sh
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: leads
+    volumes:
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n -d leads"]
+      interval: 2s
+      retries: 30
+  n8n:
+    image: n8nio/n8n:2.46.6
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      GENERIC_TIMEZONE: ${TIMEZONE:-UTC}
+      N8N_SECURE_COOKIE: "false"          # plain http on localhost; remove behind HTTPS
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      # Read once by setup.sh to create the two n8n credentials, then not used by the workflows.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+    volumes:
+      - n8ndata:/home/node/.n8n
+      - ./workflows:/import/workflows:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+volumes:
+  pgdata:
+  n8ndata:

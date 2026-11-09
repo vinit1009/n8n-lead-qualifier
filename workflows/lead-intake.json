@@ -1,0 +1,608 @@
+{
+  "id": "leadintake000001",
+  "name": "Lead intake: qualify with Claude, route, queue drafts for approval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "6e8678a8-3395-5900-b0e3-4e046d187cc4",
+      "name": "New lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "df0faac5-2b90-5341-9556-ab96e4e39feb"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6622c231-28b9-52d0-bf8f-7fc7bf8bc363",
+              "name": "business",
+              "value": "Northwind Automation, a small studio that builds AI and workflow automations for businesses",
+              "type": "string"
+            },
+            {
+              "id": "d6166abf-e334-5ae1-bc72-68483d565ae9",
+              "name": "ideal_customer",
+              "value": "a company with 10 to 500 people that describes a concrete business process it wants to automate (support, sales operations, finance operations, document handling) and has a budget or timeline",
+              "type": "string"
+            },
+            {
+              "id": "5fbada3b-a139-59da-8aaa-5d19ab748b53",
+              "name": "signature",
+              "value": "The Northwind team",
+              "type": "string"
+            },
+            {
+              "id": "190e9073-00c9-5751-8c7e-20a5f0eb8a68",
+              "name": "hot_threshold",
+              "value": 70,
+              "type": "number"
+            },
+            {
+              "id": "8899eeb9-4fd1-5964-b608-b56f22da6c63",
+              "name": "nurture_threshold",
+              "value": 40,
+              "type": "number"
+            },
+            {
+              "id": "c7ac255f-e008-5ace-ae32-d7807775a74a",
+              "name": "model",
+              "value": "anthropic/claude-haiku-5.5",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "b2a4c00a-dc9d-57b4-96e6-f3c9f0febea4",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean the form fields and refuse anything the model should never see.\nconst b = $json.body || {};\nconst clean = (v, n) => String(v ?? '').replace(/[\\u0000-\\u001f\\u007f]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, n);\nconst lead = {\n  email: clean(b.email, 254).toLowerCase(),\n  name: clean(b.name, 120),\n  company: clean(b.company, 120),\n  message: clean(b.message, 2000),\n  source: clean(b.source, 60) || 'webhook',\n};\nconst problems = [];\nif (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(lead.email)) problems.push('email is missing or invalid');\nif (!lead.name) problems.push('name is required');\nif (lead.message.length < 10) problems.push('message is too short to qualify');\nreturn { json: { ...lead, valid: problems.length === 0, problems } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "92b8792a-57cb-59d8-8fde-550af9ec56fe",
+      "name": "Validate and normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.valid ? 0 : 1 }}"
+      },
+      "id": "ce45ea4d-26aa-5468-8b4f-84dedc8c3062",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'rejected', problems: $json.problems } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "0f7d8e7a-2fcf-5ed3-89a9-8822c2dbdb5c",
+      "name": "Reject: bad input",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        880,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*)::int AS n FROM leads WHERE lower(email) = $1 AND received_at > now() - interval '30 days'",
+        "options": {
+          "queryReplacement": "={{ [$json.email] }}"
+        }
+      },
+      "id": "05825c48-1699-5e77-91ca-7a2a89344b48",
+      "name": "Seen in the last 30 days?",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        880,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "leadsdbcred00001",
+          "name": "Leads DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.n > 0 ? 1 : 0 }}"
+      },
+      "id": "ad2e3cb2-eb7a-52a0-9e81-e32ecd3536ed",
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        1100,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'duplicate', message: 'We already have this lead from the last 30 days.' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b11e8644-0777-50a5-90ce-ef9c51e93725",
+      "name": "Reply: duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the request to Claude (through OpenRouter's OpenAI-compatible API) with a forced tool call,\n// so the answer always comes back as structured fields.\nconst s = $('Settings').item.json;\nconst lead = $('Validate and normalise').item.json;  // $json here is the duplicate check's row\nconst system = [\n  `You qualify inbound leads for ${s.business}.`,\n  `Ideal customer: ${s.ideal_customer}.`,\n  'Not a fit: students, job seekers, people selling to us, and requests with no business problem.',\n  'Spam: link drops, SEO or crypto offers, gibberish.',\n  'Score the fit from 0 to 100 using only what the lead wrote; never invent facts about them.',\n  'Then draft a short first reply (under 120 words) that answers their message specifically, asks one useful question,',\n  `makes no promise about price or dates, and is signed \"${s.signature}\". Use no placeholders such as [Name].`,\n  'Call the assess_lead tool with your answer.',\n].join('\\n');\nconst user = `Lead\\nName: ${lead.name}\\nCompany: ${lead.company || '(not given)'}\\nEmail: ${lead.email}\\nMessage: ${lead.message}`;\nreturn { json: { payload: {\n  model: s.model, temperature: 0, max_tokens: 800,\n  messages: [{ role: 'system', content: system }, { role: 'user', content: user }],\n  tools: [{\"type\": \"function\", \"function\": {\"name\": \"assess_lead\", \"description\": \"Record the qualification of one inbound lead and a draft first reply.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"fit_score\": {\"type\": \"integer\", \"minimum\": 0, \"maximum\": 100}, \"segment\": {\"type\": \"string\", \"enum\": [\"ideal_customer\", \"maybe\", \"not_a_fit\", \"spam\"]}, \"reasons\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"minItems\": 1, \"maxItems\": 3}, \"email_subject\": {\"type\": \"string\"}, \"email_body\": {\"type\": \"string\"}}, \"required\": [\"fit_score\", \"segment\", \"reasons\", \"email_subject\", \"email_body\"]}}}],\n  tool_choice: { type: 'function', function: { name: 'assess_lead' } },\n} } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "2cb9f355-e736-5717-9b9f-3901cc701a43",
+      "name": "Write the prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "9e26fcc8-65d1-5e22-a3d6-0c8cc88343d3",
+      "name": "Claude: qualify and draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        140
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openroutercred01",
+          "name": "OpenRouter"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The model call failed after its retries. Keep the lead anyway and send it to a person.\nconst lead = $('Validate and normalise').item.json;\nconst why = String(($json.error && ($json.error.message || $json.error.description)) || 'no response').slice(0, 300);\nreturn { json: { ...lead, fit_score: null, segment: null, reasons: [], subject: '', body: '', route: 'review',\n  problems: ['the model could not be reached: ' + why], model: $('Settings').item.json.model } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "f8c8673c-1560-5f73-bbe8-33ca10e8258a",
+      "name": "Model unavailable: keep the lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Never trust the model's output as-is: parse it, check every field, and decide the route in code.\nconst s = $('Settings').item.json;\nconst lead = $('Validate and normalise').item.json;\nconst problems = [];\nlet a = {};\ntry {\n  const call = $json.choices[0].message.tool_calls[0];\n  a = JSON.parse(call.function.arguments);\n} catch (e) {\n  problems.push('the model did not return a tool call');\n}\nconst score = Number.isInteger(a.fit_score) && a.fit_score >= 0 && a.fit_score <= 100 ? a.fit_score : null;\nif (score === null) problems.push('fit_score must be a whole number from 0 to 100');\nconst segments = ['ideal_customer', 'maybe', 'not_a_fit', 'spam'];\nif (!segments.includes(a.segment)) problems.push('segment is not one of ' + segments.join(', '));\nconst reasons = Array.isArray(a.reasons) ? a.reasons.map(r => String(r).slice(0, 200)).slice(0, 3) : [];\nif (!reasons.length) problems.push('no reasons given');\nconst subject = String(a.email_subject || '').trim();\nconst body = String(a.email_body || '').trim();\nif (subject.length < 3 || subject.length > 90) problems.push('subject must be 3 to 90 characters');\nif (body.length < 40 || body.length > 1500) problems.push('reply must be 40 to 1,500 characters');\nif (/\\[[^\\]]{1,30}\\]|\\{\\{|\\}\\}/.test(subject + ' ' + body)) problems.push('the draft contains a placeholder');\n\nlet route = 'review';\nif (!problems.length) {\n  if (a.segment === 'spam') route = 'archive';\n  else if (score >= s.hot_threshold) route = 'hot';\n  else if (score >= s.nurture_threshold) route = 'nurture';\n  else route = 'archive';\n}\nreturn { json: { ...lead, fit_score: score, segment: a.segment ?? null, reasons, subject, body, route, problems, model: $json.model || s.model } };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "ab40cd5d-03dd-51a0-91c0-c744bd042696",
+      "name": "Check the model's answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO leads (email, name, company, message, source, fit_score, segment, reasons, route, problems, model)\nVALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11)\nRETURNING id, route",
+        "options": {
+          "queryReplacement": "={{ [$json.email, $json.name, $json.company, $json.message, $json.source, $json.fit_score, $json.segment, JSON.stringify($json.reasons), $json.route, JSON.stringify($json.problems), $json.model] }}"
+        }
+      },
+      "id": "f004f357-48f4-5508-b133-d07b0f6d22b3",
+      "name": "Save lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1980,
+        140
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "leadsdbcred00001",
+          "name": "Leads DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 4,
+        "output": "={{ ({ hot: 0, nurture: 1, archive: 2, review: 3 })[$json.route] ?? 3 }}"
+      },
+      "id": "572ca300-ef9a-5cde-8291-56130b25cf57",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        2200,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO outbox (lead_id, subject, body) VALUES ($1, $2, $3) RETURNING lead_id, token",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $('Check the model\\'s answer').item.json.subject, $('Check the model\\'s answer').item.json.body] }}"
+        }
+      },
+      "id": "9510fef6-e579-5e78-b167-b7f7b88df418",
+      "name": "Queue the draft for approval",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2420,
+        -40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "leadsdbcred00001",
+          "name": "Leads DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'pending_approval', lead_id: $json.lead_id, fit_score: $('Check the model\\'s answer').item.json.fit_score, approve_url: 'http://' + $('New lead').item.json.headers.host + '/webhook/approve?id=' + $json.lead_id + '&token=' + $json.token } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "ec4505b8-d84a-58b8-80b4-2739c1c06b5a",
+      "name": "Reply: awaiting approval",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2640,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ins AS (INSERT INTO follow_ups (lead_id, step, due_at) VALUES ($1, 1, now() + interval '2 days'), ($1, 2, now() + interval '7 days') RETURNING id) SELECT count(*)::int AS follow_ups FROM ins",
+        "options": {
+          "queryReplacement": "={{ [$json.id] }}"
+        }
+      },
+      "id": "b5ad24ba-a76d-58c8-9bad-55945f59b54c",
+      "name": "Schedule follow-ups",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2420,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "leadsdbcred00001",
+          "name": "Leads DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'nurture', lead_id: $('Save lead').item.json.id, fit_score: $('Check the model\\'s answer').item.json.fit_score, follow_ups: $json.follow_ups } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "76166afb-5fe1-5fbb-adb1-4251e572df2a",
+      "name": "Reply: nurture",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2640,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'archived', lead_id: $json.id, fit_score: $('Check the model\\'s answer').item.json.fit_score, segment: $('Check the model\\'s answer').item.json.segment } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "cc510048-cc7f-56b8-8ec3-071ef56d6e42",
+      "name": "Reply: archived",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2420,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'needs_review', lead_id: $json.id, problems: $('Check the model\\'s answer').item.json.problems } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "427b1772-e768-5910-8f0e-83da223d49ea",
+      "name": "Reply: needs review",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2420,
+        440
+      ]
+    }
+  ],
+  "connections": {
+    "New lead": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Validate and normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate and normalise": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Seen in the last 30 days?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject: bad input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seen in the last 30 days?": {
+      "main": [
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Write the prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write the prompt": {
+      "main": [
+        [
+          {
+            "node": "Claude: qualify and draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: qualify and draft": {
+      "main": [
+        [
+          {
+            "node": "Check the model's answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Model unavailable: keep the lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model unavailable: keep the lead": {
+      "main": [
+        [
+          {
+            "node": "Save lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check the model's answer": {
+      "main": [
+        [
+          {
+            "node": "Save lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save lead": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Queue the draft for approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Schedule follow-ups",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: archived",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply: needs review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue the draft for approval": {
+      "main": [
+        [
+          {
+            "node": "Reply: awaiting approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule follow-ups": {
+      "main": [
+        [
+          {
+            "node": "Reply: nurture",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "errorlog00000001"
+  },
+  "active": false,
+  "pinData": {}
+}
